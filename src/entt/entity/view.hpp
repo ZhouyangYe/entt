@@ -21,6 +21,107 @@ namespace entt {
 
 
 /**
+ * @cond TURN_OFF_DOXYGEN
+ * Internal details not to be documented.
+ */
+
+
+namespace internal {
+
+
+template<typename Policy, typename It, std::size_t AllOf, std::size_t NoneOf>
+class view_iterator final: Policy {
+    using basic_common_type = basic_sparse_set<typename std::iterator_traits<It>::value_type>;
+
+    [[nodiscard]] bool valid() const {
+        const auto entt = *it;
+        return Policy::operator()(entt)
+            && std::apply([entt](const auto *... curr) { return (curr->contains(entt) && ...); }, pools)
+            && std::apply([entt](const auto *... curr) { return (!curr->contains(entt) && ...); }, filter);
+    }
+
+public:
+    using difference_type = typename std::iterator_traits<It>::difference_type;
+    using value_type = typename std::iterator_traits<It>::value_type;
+    using pointer = typename std::iterator_traits<It>::pointer;
+    using reference = typename std::iterator_traits<It>::reference;
+    using iterator_category = std::bidirectional_iterator_tag;
+
+    view_iterator() ENTT_NOEXCEPT
+        : first{},
+          last{},
+          it{},
+          pools{},
+          filter{}
+    {}
+
+    view_iterator(It from, It to, It curr, std::array<const basic_common_type *, AllOf> all_of, std::array<const basic_common_type *, NoneOf> none_of) ENTT_NOEXCEPT
+        : first{from},
+          last{to},
+          it{curr},
+          pools{all_of},
+          filter{none_of}
+    {
+        if(it != last && !valid()) {
+            ++(*this);
+        }
+    }
+
+    view_iterator & operator++() ENTT_NOEXCEPT {
+        while(++it != last && !valid());
+        return *this;
+    }
+
+    view_iterator operator++(int) ENTT_NOEXCEPT {
+        view_iterator orig = *this;
+        return ++(*this), orig;
+    }
+
+    view_iterator & operator--() ENTT_NOEXCEPT {
+        while(--it != first && !valid());
+        return *this;
+    }
+
+    view_iterator operator--(int) ENTT_NOEXCEPT {
+        view_iterator orig = *this;
+        return operator--(), orig;
+    }
+
+    [[nodiscard]] bool operator==(const view_iterator &other) const ENTT_NOEXCEPT {
+        return other.it == it;
+    }
+
+    [[nodiscard]] bool operator!=(const view_iterator &other) const ENTT_NOEXCEPT {
+        return !(*this == other);
+    }
+
+    [[nodiscard]] pointer operator->() const {
+        return &*it;
+    }
+
+    [[nodiscard]] reference operator*() const {
+        return *operator->();
+    }
+
+private:
+    It first;
+    It last;
+    It it;
+    std::array<const basic_common_type *, AllOf> pools;
+    std::array<const basic_common_type *, NoneOf> filter;
+};
+
+
+}
+
+
+/**
+* Internal details not to be documented.
+* @endcond
+*/
+
+
+/**
  * @brief View.
  *
  * Primary template isn't defined on purpose. All the specializations give a
@@ -65,89 +166,12 @@ class basic_view;
  */
 template<typename Entity, typename... Exclude, typename... Component>
 class basic_view<Entity, exclude_t<Exclude...>, Component...> final {
+    using basic_common_type = basic_sparse_set<Entity>;
+
     template<typename Comp>
     using storage_type = constness_as_t<typename storage_traits<Entity, std::remove_const_t<Comp>>::storage_type, Comp>;
 
-    using unchecked_type = std::array<const basic_sparse_set<Entity> *, (sizeof...(Component) - 1)>;
-
-    template<typename It>
-    class view_iterator final {
-        friend class basic_view<Entity, exclude_t<Exclude...>, Component...>;
-
-        view_iterator(It from, It to, It curr, unchecked_type other, const std::tuple<const storage_type<Exclude> *...> &ignore) ENTT_NOEXCEPT
-            : first{from},
-              last{to},
-              it{curr},
-              unchecked{other},
-              filter{ignore}
-        {
-            if(it != last && !valid()) {
-                ++(*this);
-            }
-        }
-
-        [[nodiscard]] bool valid() const {
-            const auto entt = *it;
-
-            return std::all_of(unchecked.cbegin(), unchecked.cend(), [entt](const basic_sparse_set<Entity> *curr) { return curr->contains(entt); })
-                && !(std::get<const storage_type<Exclude> *>(filter)->contains(entt) || ...);
-        }
-
-    public:
-        using difference_type = typename std::iterator_traits<It>::difference_type;
-        using value_type = typename std::iterator_traits<It>::value_type;
-        using pointer = typename std::iterator_traits<It>::pointer;
-        using reference = typename std::iterator_traits<It>::reference;
-        using iterator_category = std::bidirectional_iterator_tag;
-
-        view_iterator() ENTT_NOEXCEPT
-            : view_iterator{{}, {}, {}, {}, {}}
-        {}
-
-        view_iterator & operator++() ENTT_NOEXCEPT {
-            while(++it != last && !valid());
-            return *this;
-        }
-
-        view_iterator operator++(int) ENTT_NOEXCEPT {
-            view_iterator orig = *this;
-            return ++(*this), orig;
-        }
-
-        view_iterator & operator--() ENTT_NOEXCEPT {
-            while(--it != first && !valid());
-            return *this;
-        }
-
-        view_iterator operator--(int) ENTT_NOEXCEPT {
-            view_iterator orig = *this;
-            return operator--(), orig;
-        }
-
-        [[nodiscard]] bool operator==(const view_iterator &other) const ENTT_NOEXCEPT {
-            return other.it == it;
-        }
-
-        [[nodiscard]] bool operator!=(const view_iterator &other) const ENTT_NOEXCEPT {
-            return !(*this == other);
-        }
-
-        [[nodiscard]] pointer operator->() const {
-            return &*it;
-        }
-
-        [[nodiscard]] reference operator*() const {
-            return *operator->();
-        }
-
-    private:
-        It first;
-        It last;
-        It it;
-        unchecked_type unchecked;
-        std::tuple<const storage_type<Exclude> *...> filter;
-    };
-
+    template<typename Policy>
     class iterable_view final {
         friend class basic_view<Entity, exclude_t<Exclude...>, Component...>;
 
@@ -198,8 +222,8 @@ class basic_view<Entity, exclude_t<Exclude...>, Component...> final {
         {}
 
     public:
-        using iterator = iterable_view_iterator<view_iterator<typename basic_sparse_set<Entity>::iterator>>;
-        using reverse_iterator = iterable_view_iterator<view_iterator<typename basic_sparse_set<Entity>::reverse_iterator>>;
+        using iterator = iterable_view_iterator<internal::view_iterator<Policy, typename basic_common_type::iterator, sizeof...(Component) - 1u, sizeof...(Exclude)>>;
+        using reverse_iterator = iterable_view_iterator<internal::view_iterator<Policy, typename basic_common_type::reverse_iterator, sizeof...(Component) - 1u, sizeof...(Exclude)>>;
 
         [[nodiscard]] iterator begin() const ENTT_NOEXCEPT {
             return { view.begin(), &view };
@@ -221,17 +245,21 @@ class basic_view<Entity, exclude_t<Exclude...>, Component...> final {
         const basic_view view;
     };
 
-    [[nodiscard]] const basic_sparse_set<Entity> * candidate() const ENTT_NOEXCEPT {
-        return (std::min)({ static_cast<const basic_sparse_set<entity_type> *>(std::get<storage_type<Component> *>(pools))... }, [](const auto *lhs, const auto *rhs) {
+    [[nodiscard]] const auto * candidate() const ENTT_NOEXCEPT {
+        return (std::min)({ static_cast<const basic_common_type *>(std::get<storage_type<Component> *>(pools))... }, [](const auto *lhs, const auto *rhs) {
             return lhs->size() < rhs->size();
         });
     }
 
-    [[nodiscard]] unchecked_type unchecked(const basic_sparse_set<Entity> *cpool) const {
+    [[nodiscard]] auto pools_to_unchecked_array() const ENTT_NOEXCEPT {
         std::size_t pos{};
-        unchecked_type other{};
-        (static_cast<void>(std::get<storage_type<Component> *>(pools) == cpool ? void() : void(other[pos++] = std::get<storage_type<Component> *>(pools))), ...);
+        std::array<const basic_common_type *, sizeof...(Component) - 1u> other{};
+        (static_cast<void>(std::get<storage_type<Component> *>(pools) == view ? void() : void(other[pos++] = std::get<storage_type<Component> *>(pools))), ...);
         return other;
+    }
+
+    [[nodiscard]] auto filter_to_array() const ENTT_NOEXCEPT {
+        return std::array<const basic_common_type *, sizeof...(Exclude)>{std::get<const storage_type<Exclude> *>(filter)...};
     }
 
     template<typename Comp, typename It>
@@ -243,12 +271,12 @@ class basic_view<Entity, exclude_t<Exclude...>, Component...> final {
         }
     }
 
-    template<typename Comp, typename Func>
-    void traverse(Func func) const {
+    template<typename Comp, typename Policy, typename Func>
+    void traverse(Policy policy, Func func) const {
         if constexpr(std::is_void_v<decltype(std::get<storage_type<Comp> *>(pools)->get({}))>) {
-            for(const auto entt: static_cast<const basic_sparse_set<entity_type> &>(*std::get<storage_type<Comp> *>(pools))) {
-                if(((std::is_same_v<Comp, Component> || std::get<storage_type<Component> *>(pools)->contains(entt)) && ...)
-                    && !(std::get<const storage_type<Exclude> *>(filter)->contains(entt) || ...))
+            for(const auto entt: static_cast<const basic_common_type &>(*std::get<storage_type<Comp> *>(pools))) {
+                if(policy(entt) && ((std::is_same_v<Comp, Component> || std::get<storage_type<Component> *>(pools)->contains(entt)) && ...)
+                    && (!std::get<const storage_type<Exclude> *>(filter)->contains(entt) && ...))
                 {
                     if constexpr(is_applicable_v<Func, decltype(std::tuple_cat(std::tuple<entity_type>{}, std::declval<basic_view>().get({})))>) {
                         std::apply(func, std::tuple_cat(std::make_tuple(entt), get(entt)));
@@ -260,9 +288,9 @@ class basic_view<Entity, exclude_t<Exclude...>, Component...> final {
         } else {
             auto it = std::get<storage_type<Comp> *>(pools)->begin();
 
-            for(const auto entt: static_cast<const basic_sparse_set<entity_type> &>(*std::get<storage_type<Comp> *>(pools))) {
-                if(((std::is_same_v<Comp, Component> || std::get<storage_type<Component> *>(pools)->contains(entt)) && ...)
-                    && !(std::get<const storage_type<Exclude> *>(filter)->contains(entt) || ...))
+            for(const auto entt: static_cast<const basic_common_type &>(*std::get<storage_type<Comp> *>(pools))) {
+                if(policy(entt) && ((std::is_same_v<Comp, Component> || std::get<storage_type<Component> *>(pools)->contains(entt)) && ...)
+                    && (!std::get<const storage_type<Exclude> *>(filter)->contains(entt) && ...))
                 {
                     if constexpr(is_applicable_v<Func, decltype(std::tuple_cat(std::tuple<entity_type>{}, std::declval<basic_view>().get({})))>) {
                         std::apply(func, std::tuple_cat(std::make_tuple(entt), dispatch_get<Component>(it, entt)...));
@@ -282,9 +310,9 @@ public:
     /*! @brief Unsigned integer type. */
     using size_type = std::size_t;
     /*! @brief Bidirectional iterator type. */
-    using iterator = view_iterator<typename basic_sparse_set<entity_type>::iterator>;
+    using iterator = internal::view_iterator<basic_iteration_policy, typename basic_common_type::iterator, sizeof...(Component) - 1u, sizeof...(Exclude)>;
     /*! @brief Reverse iterator type. */
-    using reverse_iterator = view_iterator<typename basic_sparse_set<entity_type>::reverse_iterator>;
+    using reverse_iterator = internal::view_iterator<basic_iteration_policy, typename basic_common_type::reverse_iterator, sizeof...(Component) - 1u, sizeof...(Exclude)>;
 
     /*! @brief Default constructor to use to create empty, invalid views. */
     basic_view() ENTT_NOEXCEPT
@@ -328,7 +356,7 @@ public:
      * @return An iterator to the first entity of the view.
      */
     [[nodiscard]] iterator begin() const {
-        return iterator{view->begin(), view->end(), view->begin(), unchecked(view), filter};
+        return iterator{view->begin(), view->end(), view->begin(), pools_to_unchecked_array(), filter_to_array()};
     }
 
     /**
@@ -341,7 +369,7 @@ public:
      * @return An iterator to the entity following the last entity of the view.
      */
     [[nodiscard]] iterator end() const {
-        return iterator{view->begin(), view->end(), view->end(), unchecked(view), filter};
+        return iterator{view->begin(), view->end(), view->end(), pools_to_unchecked_array(), filter_to_array()};
     }
 
     /**
@@ -353,7 +381,7 @@ public:
      * @return An iterator to the first entity of the reversed view.
      */
     [[nodiscard]] reverse_iterator rbegin() const {
-        return reverse_iterator{view->rbegin(), view->rend(), view->rbegin(), unchecked(view), filter};
+        return reverse_iterator{view->rbegin(), view->rend(), view->rbegin(), pools_to_unchecked_array(), filter_to_array()};
     }
 
     /**
@@ -368,7 +396,7 @@ public:
      * reversed view.
      */
     [[nodiscard]] reverse_iterator rend() const {
-        return reverse_iterator{view->rbegin(), view->rend(), view->rend(), unchecked(view), filter};
+        return reverse_iterator{view->rbegin(), view->rend(), view->rend(), pools_to_unchecked_array(), filter_to_array()};
     }
 
     /**
@@ -398,7 +426,7 @@ public:
      * iterator otherwise.
      */
     [[nodiscard]] iterator find(const entity_type entt) const {
-        const auto it = iterator{view->begin(), view->end(), view->find(entt), unchecked(view), filter};
+        const auto it = iterator{view->begin(), view->end(), view->find(entt), pools_to_unchecked_array(), filter_to_array()};
         return (it != end() && *it == entt) ? it : end();
     }
 
@@ -416,7 +444,7 @@ public:
      * @return True if the view contains the given entity, false otherwise.
      */
     [[nodiscard]] bool contains(const entity_type entt) const {
-        return (std::get<storage_type<Component> *>(pools)->contains(entt) && ...) && !(std::get<const storage_type<Exclude> *>(filter)->contains(entt) || ...);
+        return (std::get<storage_type<Component> *>(pools)->contains(entt) && ...) && (!std::get<const storage_type<Exclude> *>(filter)->contains(entt) && ...);
     }
 
     /**
@@ -448,8 +476,8 @@ public:
     }
 
     /**
-     * @brief Iterates entities and components and applies the given function
-     * object to them.
+     * @brief Iterates entities and components and applies the given iteration
+     * policy and function object to them.
      *
      * The function object is invoked for each entity. It is provided with the
      * entity itself and a set of references to non-empty components. The
@@ -466,23 +494,53 @@ public:
      * Empty types aren't explicitly instantiated and therefore they are never
      * returned during iterations.
      *
+     * @tparam Policy Type of iteration policy.
      * @tparam Func Type of the function object to invoke.
+     * @param policy The iteration policy to use.
      * @param func A valid function object.
      */
-    template<typename Func>
-    void each(Func func) const {
-        ((std::get<storage_type<Component> *>(pools) == view ? traverse<Component>(std::move(func)) : void()), ...);
+    template<typename Policy, typename Func, typename = std::enable_if_t<is_iteration_policy_v<Policy>>>
+    void each(Policy policy, Func func) const {
+        ((std::get<storage_type<Component> *>(pools) == view ? traverse<Component>(policy, std::move(func)) : void()), ...);
     }
 
     /**
-     * @brief Iterates entities and components and applies the given function
-     * object to them.
+     * @brief Iterates entities and components with the basic iteration policy.
+     *
+     * @sa each
+     *
+     * @tparam Func Type of the function object to invoke.
+     * @param func A valid function object.
+     */
+    template<typename Func, typename = std::enable_if_t<!is_iteration_policy_v<Func>>>
+    void each(Func func) const {
+        each(basic_iteration_policy{}, std::move(func));
+    }
+
+    /**
+     * @brief Iterates entities and components and applies the given iterations
+     * policy and function object to them.
      *
      * The pool of the suggested component is used to lead the iterations. The
      * returned entities will therefore respect the order of the pool associated
-     * with that type.<br/>
-     * It is no longer guaranteed that the performance is the best possible, but
-     * there will be greater control over the order of iteration.
+     * with that type.
+     *
+     * @sa each
+     *
+     * @tparam Comp Type of component to use to drive the iteration.
+     * @tparam Policy Type of iteration policy.
+     * @tparam Func Type of the function object to invoke.
+     * @param policy The iteration policy to use.
+     * @param func A valid function object.
+     */
+    template<typename Comp, typename Policy, typename Func, typename = std::enable_if_t<is_iteration_policy_v<Policy>>>
+    void each(Policy policy, Func func) const {
+        use<Comp>();
+        traverse<Comp>(policy, std::move(func));
+    }
+
+    /**
+     * @brief Iterates entities and components with the basic iteration policy.
      *
      * @sa each
      *
@@ -490,14 +548,14 @@ public:
      * @tparam Func Type of the function object to invoke.
      * @param func A valid function object.
      */
-    template<typename Comp, typename Func>
+    template<typename Comp, typename Func, typename = std::enable_if_t<!is_iteration_policy_v<Func>>>
     void each(Func func) const {
-        use<Comp>();
-        traverse<Comp>(std::move(func));
+        each<Comp>(basic_iteration_policy{}, std::move(func));
     }
 
     /**
-     * @brief Returns an iterable object to use to _visit_ the view.
+     * @brief Returns an iterable object to use to _visit_ the view according to
+     * the given iteration policy.
      *
      * The iterable object returns tuples that contain the current entity and a
      * set of references to its non-empty components. The _constness_ of the
@@ -507,20 +565,51 @@ public:
      * Empty types aren't explicitly instantiated and therefore they are never
      * returned during iterations.
      *
+     * @tparam Policy Type of iteration policy.
+     * @param policy The iteration policy to use.
      * @return An iterable object to use to _visit_ the view.
      */
-    [[nodiscard]] iterable_view each() const ENTT_NOEXCEPT {
-        return iterable_view{*this};
+    template<typename Policy, typename = std::enable_if_t<is_iteration_policy_v<Policy>>>
+    [[nodiscard]] iterable_view<Policy> each(Policy policy) const ENTT_NOEXCEPT {
+        return iterable_view<Policy>{*this};
     }
 
     /**
-     * @brief Returns an iterable object to use to _visit_ the view.
+     * @brief Returns an iterable object to use to _visit_ the view with a basic
+     * iteration policy.
+     *
+     * @sa each
+     *
+     * @return An iterable object to use to _visit_ the view.
+     */
+    [[nodiscard]] iterable_view<basic_iteration_policy> each() const ENTT_NOEXCEPT {
+        return each(basic_iteration_policy{});
+    }
+
+    /**
+     * @brief Returns an iterable object to use to _visit_ the view according to
+     * the given iteration policy.
      *
      * The pool of the suggested component is used to lead the iterations. The
      * returned elements will therefore respect the order of the pool associated
-     * with that type.<br/>
-     * It is no longer guaranteed that the performance is the best possible, but
-     * there will be greater control over the order of iteration.
+     * with that type.
+     *
+     * @sa each
+     *
+     * @tparam Comp Type of component to use to drive the iteration.
+     * @tparam Policy Type of iteration policy.
+     * @param policy The iteration policy to use.
+     * @return An iterable object to use to _visit_ the view.
+     */
+    template<typename Comp, typename Policy, typename = std::enable_if_t<is_iteration_policy_v<Policy>>>
+    [[nodiscard]] iterable_view<Policy> each(Policy policy) const ENTT_NOEXCEPT {
+        use<Comp>();
+        return iterable_view<Policy>{*this};
+    }
+
+    /**
+     * @brief Returns an iterable object to use to _visit_ the view with a basic
+     * iteration policy.
      *
      * @sa each
      *
@@ -528,9 +617,8 @@ public:
      * @return An iterable object to use to _visit_ the view.
      */
     template<typename Comp>
-    [[nodiscard]] iterable_view each() const ENTT_NOEXCEPT {
-        use<Comp>();
-        return iterable_view{*this};
+    [[nodiscard]] iterable_view<basic_iteration_policy> each() const ENTT_NOEXCEPT {
+        return each<Comp>(basic_iteration_policy{});
     }
 
     /**
@@ -548,7 +636,7 @@ public:
 private:
     const std::tuple<storage_type<Component> *...> pools;
     const std::tuple<const storage_type<Exclude> *...> filter;
-    mutable const basic_sparse_set<entity_type> *view;
+    mutable const basic_common_type *view;
 };
 
 
@@ -585,10 +673,14 @@ private:
  */
 template<typename Entity, typename Component>
 class basic_view<Entity, exclude_t<>, Component> final {
+    using basic_common_type = basic_sparse_set<Entity>;
     using storage_type = constness_as_t<typename storage_traits<Entity, std::remove_const_t<Component>>::storage_type, Component>;
 
+    template<typename Policy>
     class iterable_view final {
         friend class basic_view<Entity, exclude_t<>, Component>;
+
+        // TODO
 
         template<typename... It>
         class iterable_view_iterator final {
@@ -638,29 +730,29 @@ class basic_view<Entity, exclude_t<>, Component> final {
     public:
         using iterator = std::conditional_t<
             std::is_void_v<decltype(std::declval<storage_type>().get({}))>,
-            iterable_view_iterator<typename basic_sparse_set<Entity>::iterator>,
-            iterable_view_iterator<typename basic_sparse_set<Entity>::iterator, decltype(std::declval<storage_type>().begin())>
+            iterable_view_iterator<typename basic_common_type::iterator>,
+            iterable_view_iterator<typename basic_common_type::iterator, decltype(std::declval<storage_type>().begin())>
         >;
         using reverse_iterator = std::conditional_t<
             std::is_void_v<decltype(std::declval<storage_type>().get({}))>,
-            iterable_view_iterator<typename basic_sparse_set<Entity>::reverse_iterator>,
-            iterable_view_iterator<typename basic_sparse_set<Entity>::reverse_iterator, decltype(std::declval<storage_type>().rbegin())>
+            iterable_view_iterator<typename basic_common_type::reverse_iterator>,
+            iterable_view_iterator<typename basic_common_type::reverse_iterator, decltype(std::declval<storage_type>().rbegin())>
         >;
 
         [[nodiscard]] iterator begin() const ENTT_NOEXCEPT {
-            return iterator{pool->basic_sparse_set<entity_type>::begin(), pool->begin()};
+            return iterator{pool->basic_common_type::begin(), pool->begin()};
         }
 
         [[nodiscard]] iterator end() const ENTT_NOEXCEPT {
-            return iterator{pool->basic_sparse_set<entity_type>::end(), pool->end()};
+            return iterator{pool->basic_common_type::end(), pool->end()};
         }
 
         [[nodiscard]] reverse_iterator rbegin() const ENTT_NOEXCEPT {
-            return reverse_iterator{pool->basic_sparse_set<entity_type>::rbegin(), pool->rbegin()};
+            return reverse_iterator{pool->basic_common_type::rbegin(), pool->rbegin()};
         }
 
         [[nodiscard]] reverse_iterator rend() const ENTT_NOEXCEPT {
-            return reverse_iterator{pool->basic_sparse_set<entity_type>::rend(), pool->rend()};
+            return reverse_iterator{pool->basic_common_type::rend(), pool->rend()};
         }
 
     private:
@@ -673,9 +765,9 @@ public:
     /*! @brief Unsigned integer type. */
     using size_type = std::size_t;
     /*! @brief Random access iterator type. */
-    using iterator = typename basic_sparse_set<Entity>::iterator;
+    using iterator = typename basic_common_type::iterator;
     /*! @brief Reversed iterator type. */
-    using reverse_iterator = typename basic_sparse_set<Entity>::reverse_iterator;
+    using reverse_iterator = typename basic_common_type::reverse_iterator;
 
     /*! @brief Default constructor to use to create empty, invalid views. */
     basic_view() ENTT_NOEXCEPT
@@ -737,7 +829,7 @@ public:
      * @return An iterator to the first entity of the view.
      */
     [[nodiscard]] iterator begin() const ENTT_NOEXCEPT {
-        return std::get<0>(pools)->basic_sparse_set<entity_type>::begin();
+        return std::get<0>(pools)->basic_common_type::begin();
     }
 
     /**
@@ -750,7 +842,7 @@ public:
      * @return An iterator to the entity following the last entity of the view.
      */
     [[nodiscard]] iterator end() const ENTT_NOEXCEPT {
-        return std::get<0>(pools)->basic_sparse_set<entity_type>::end();
+        return std::get<0>(pools)->basic_common_type::end();
     }
 
     /**
@@ -762,7 +854,7 @@ public:
      * @return An iterator to the first entity of the reversed view.
      */
     [[nodiscard]] reverse_iterator rbegin() const ENTT_NOEXCEPT {
-        return std::get<0>(pools)->basic_sparse_set<entity_type>::rbegin();
+        return std::get<0>(pools)->basic_common_type::rbegin();
     }
 
     /**
@@ -777,7 +869,7 @@ public:
      * reversed view.
      */
     [[nodiscard]] reverse_iterator rend() const ENTT_NOEXCEPT {
-        return std::get<0>(pools)->basic_sparse_set<entity_type>::rend();
+        return std::get<0>(pools)->basic_common_type::rend();
     }
 
     /**
@@ -865,8 +957,8 @@ public:
     }
 
     /**
-     * @brief Iterates entities and components and applies the given function
-     * object to them.
+     * @brief Iterates entities and components and applies the given iteration
+     * policy and function object to them.
      *
      * The function object is invoked for each entity. It is provided with the
      * entity itself and a reference to the component if it's a non-empty one.
@@ -883,10 +975,45 @@ public:
      * Empty types aren't explicitly instantiated and therefore they are never
      * returned during iterations.
      *
+     * @tparam Policy Type of iteration policy.
+     * @tparam Func Type of the function object to invoke.
+     * @param policy The iteration policy to use.
+     * @param func A valid function object.
+     */
+    template<typename Policy, typename Func, typename = std::enable_if_t<is_iteration_policy_v<Policy>>>
+    void each(Policy policy, Func func) const {
+        if constexpr(std::is_void_v<decltype(std::get<0>(pools)->get({}))>) {
+            for(auto entity: *this) {
+                if(policy(entity)) {
+                    if constexpr(std::is_invocable_v<Func>) {
+                        func();
+                    } else {
+                        func(entity);
+                    }
+                }
+            }
+        } else {
+            for(const auto pack: each()) {
+                if(policy(std::get<0u>(pack))) {
+                    if constexpr(is_applicable_v<Func, decltype(*each().begin())>) {
+                        std::apply(func, pack);
+                    } else {
+                        func(std::get<1u>(pack));
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * @brief Iterates entities and components with the basic iteration policy.
+     *
+     * @sa each
+     *
      * @tparam Func Type of the function object to invoke.
      * @param func A valid function object.
      */
-    template<typename Func>
+    template<typename Func, typename = std::enable_if_t<!is_iteration_policy_v<Func>>>
     void each(Func func) const {
         if constexpr(std::is_void_v<decltype(std::get<0>(pools)->get({}))>) {
             if constexpr(std::is_invocable_v<Func>) {
@@ -912,7 +1039,8 @@ public:
     }
 
     /**
-     * @brief Returns an iterable object to use to _visit_ the view.
+     * @brief Returns an iterable object to use to _visit_ the view according to
+     * the given iteration policy.
      *
      * The iterable object returns tuples that contain the current entity and a
      * reference to its component if it's a non-empty one. The _constness_ of
@@ -922,10 +1050,25 @@ public:
      * Empty types aren't explicitly instantiated and therefore they are never
      * returned during iterations.
      *
+     * @tparam Policy Type of iteration policy.
+     * @param policy The iteration policy to use.
      * @return An iterable object to use to _visit_ the view.
      */
-    [[nodiscard]] iterable_view each() const ENTT_NOEXCEPT {
-        return iterable_view{*std::get<0>(pools)};
+    template<typename Policy, typename = std::enable_if_t<is_iteration_policy_v<Policy>>>
+    [[nodiscard]] iterable_view<Policy> each(Policy policy) const ENTT_NOEXCEPT {
+        return iterable_view<Policy>{*std::get<0>(pools)};
+    }
+
+    /**
+     * @brief Returns an iterable object to use to _visit_ the view with a basic
+     * iteration policy.
+     *
+     * @sa each
+     *
+     * @return An iterable object to use to _visit_ the view.
+     */
+    [[nodiscard]] iterable_view<basic_iteration_policy> each() const ENTT_NOEXCEPT {
+        return iterable_view<basic_iteration_policy>{*std::get<0>(pools)};
     }
 
     /**

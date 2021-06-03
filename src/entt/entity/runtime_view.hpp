@@ -55,12 +55,13 @@ namespace entt {
  */
 template<typename Entity>
 class basic_runtime_view final {
-    using underlying_iterator = typename basic_sparse_set<Entity>::iterator;
+    using basic_common_type = basic_sparse_set<Entity>;
+    using underlying_iterator = typename basic_common_type::iterator;
 
     class view_iterator final {
         friend class basic_runtime_view<Entity>;
 
-        view_iterator(const std::vector<const basic_sparse_set<Entity> *> &cpools, const std::vector<const basic_sparse_set<Entity> *> &ignore, underlying_iterator curr) ENTT_NOEXCEPT
+        view_iterator(const std::vector<const basic_common_type *> &cpools, const std::vector<const basic_common_type *> &ignore, underlying_iterator curr) ENTT_NOEXCEPT
             : pools{&cpools},
               filter{&ignore},
               it{curr}
@@ -121,8 +122,8 @@ class basic_runtime_view final {
         }
 
     private:
-        const std::vector<const basic_sparse_set<Entity> *> *pools;
-        const std::vector<const basic_sparse_set<Entity> *> *filter;
+        const std::vector<const basic_common_type *> *pools;
+        const std::vector<const basic_common_type *> *filter;
         underlying_iterator it;
     };
 
@@ -149,7 +150,7 @@ public:
      * @param cpools The storage for the types to iterate.
      * @param epools The storage for the types used to filter the view.
      */
-    basic_runtime_view(std::vector<const basic_sparse_set<Entity> *> cpools, std::vector<const basic_sparse_set<Entity> *> epools) ENTT_NOEXCEPT
+    basic_runtime_view(std::vector<const basic_common_type *> cpools, std::vector<const basic_common_type *> epools) ENTT_NOEXCEPT
         : pools{std::move(cpools)},
           filter{std::move(epools)}
     {
@@ -231,8 +232,8 @@ public:
     }
 
 private:
-    std::vector<const basic_sparse_set<Entity> *> pools;
-    std::vector<const basic_sparse_set<Entity> *> filter;
+    std::vector<const basic_common_type *> pools;
+    std::vector<const basic_common_type *> filter;
 };
 
 

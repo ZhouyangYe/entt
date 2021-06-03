@@ -68,6 +68,8 @@ class basic_group<Entity, exclude_t<Exclude...>, get_t<Get...>> final {
     /*! @brief A registry is allowed to create groups. */
     friend class basic_registry<Entity>;
 
+    using basic_common_type = basic_sparse_set<Entity>;
+
     template<typename Component>
     using storage_type = constness_as_t<typename storage_traits<Entity, std::remove_const_t<Component>>::storage_type, Component>;
 
@@ -118,14 +120,14 @@ class basic_group<Entity, exclude_t<Exclude...>, get_t<Get...>> final {
             std::tuple<storage_type<Get> *...> pools;
         };
 
-        iterable_group(basic_sparse_set<Entity> * const ref, const std::tuple<storage_type<Get> *...> &cpools)
+        iterable_group(basic_common_type * const ref, const std::tuple<storage_type<Get> *...> &cpools)
             : handler{ref},
               pools{cpools}
         {}
 
     public:
-        using iterator = iterable_group_iterator<typename basic_sparse_set<Entity>::iterator>;
-        using reverse_iterator = iterable_group_iterator<typename basic_sparse_set<Entity>::reverse_iterator>;
+        using iterator = iterable_group_iterator<typename basic_common_type::iterator>;
+        using reverse_iterator = iterable_group_iterator<typename basic_common_type::reverse_iterator>;
 
         [[nodiscard]] iterator begin() const ENTT_NOEXCEPT {
             return handler ? iterator{handler->begin(), pools} : iterator{{}, pools};
@@ -144,11 +146,11 @@ class basic_group<Entity, exclude_t<Exclude...>, get_t<Get...>> final {
         }
 
     private:
-        basic_sparse_set<Entity> * const handler;
+        basic_common_type * const handler;
         const std::tuple<storage_type<Get> *...> pools;
     };
 
-    basic_group(basic_sparse_set<Entity> &ref, storage_type<Get> &... gpool) ENTT_NOEXCEPT
+    basic_group(basic_common_type &ref, storage_type<Get> &... gpool) ENTT_NOEXCEPT
         : handler{&ref},
           pools{&gpool...}
     {}
@@ -159,9 +161,9 @@ public:
     /*! @brief Unsigned integer type. */
     using size_type = std::size_t;
     /*! @brief Random access iterator type. */
-    using iterator = typename basic_sparse_set<Entity>::iterator;
+    using iterator = typename basic_common_type::iterator;
     /*! @brief Reversed iterator type. */
-    using reverse_iterator = typename basic_sparse_set<Entity>::reverse_iterator;
+    using reverse_iterator = typename basic_common_type::reverse_iterator;
 
     /*! @brief Default constructor to use to create empty, invalid groups. */
     basic_group() ENTT_NOEXCEPT
@@ -478,7 +480,7 @@ public:
     }
 
 private:
-    basic_sparse_set<entity_type> * const handler;
+    basic_common_type * const handler;
     const std::tuple<storage_type<Get> *...> pools;
 };
 
@@ -533,6 +535,8 @@ template<typename Entity, typename... Exclude, typename... Get, typename... Owne
 class basic_group<Entity, exclude_t<Exclude...>, get_t<Get...>, Owned...> final {
     /*! @brief A registry is allowed to create groups. */
     friend class basic_registry<Entity>;
+
+    using basic_common_type = basic_sparse_set<Entity>;
 
     template<typename Component>
     using storage_type = constness_as_t<typename storage_traits<Entity, std::remove_const_t<Component>>::storage_type, Component>;
@@ -599,17 +603,17 @@ class basic_group<Entity, exclude_t<Exclude...>, get_t<Get...>, Owned...> final 
 
     public:
         using iterator = iterable_group_iterator<
-            typename basic_sparse_set<Entity>::iterator,
+            typename basic_common_type::iterator,
             type_list_cat_t<std::conditional_t<std::is_void_v<decltype(std::declval<storage_type<Owned>>().get({}))>, type_list<>, type_list<decltype(std::declval<storage_type<Owned>>().end())>>...>
         >;
         using reverse_iterator = iterable_group_iterator<
-            typename basic_sparse_set<Entity>::reverse_iterator,
+            typename basic_common_type::reverse_iterator,
             type_list_cat_t<std::conditional_t<std::is_void_v<decltype(std::declval<storage_type<Owned>>().get({}))>, type_list<>, type_list<decltype(std::declval<storage_type<Owned>>().rbegin())>>...>
         >;
 
         [[nodiscard]] iterator begin() const ENTT_NOEXCEPT {
             return length ? iterator{
-                std::get<0>(pools)->basic_sparse_set<Entity>::end() - *length,
+                std::get<0>(pools)->basic_common_type::end() - *length,
                 std::make_tuple((std::get<storage_type<Owned> *>(pools)->end() - *length)...),
                 std::make_tuple(std::get<storage_type<Get> *>(pools)...)
             } : iterator{{}, std::make_tuple(decltype(std::get<storage_type<Owned> *>(pools)->end()){}...), std::make_tuple(std::get<storage_type<Get> *>(pools)...)};
@@ -617,7 +621,7 @@ class basic_group<Entity, exclude_t<Exclude...>, get_t<Get...>, Owned...> final 
 
         [[nodiscard]] iterator end() const ENTT_NOEXCEPT {
             return length ? iterator{
-                std::get<0>(pools)->basic_sparse_set<Entity>::end(),
+                std::get<0>(pools)->basic_common_type::end(),
                 std::make_tuple((std::get<storage_type<Owned> *>(pools)->end())...),
                 std::make_tuple(std::get<storage_type<Get> *>(pools)...)
             } : iterator{{}, std::make_tuple(decltype(std::get<storage_type<Owned> *>(pools)->end()){}...), std::make_tuple(std::get<storage_type<Get> *>(pools)...)};
@@ -625,7 +629,7 @@ class basic_group<Entity, exclude_t<Exclude...>, get_t<Get...>, Owned...> final 
 
         [[nodiscard]] reverse_iterator rbegin() const ENTT_NOEXCEPT {
             return length ? reverse_iterator{
-                std::get<0>(pools)->basic_sparse_set<Entity>::rbegin(),
+                std::get<0>(pools)->basic_common_type::rbegin(),
                 std::make_tuple((std::get<storage_type<Owned> *>(pools)->rbegin())...),
                 std::make_tuple(std::get<storage_type<Get> *>(pools)...)
             } : reverse_iterator{{}, std::make_tuple(decltype(std::get<storage_type<Owned> *>(pools)->rbegin()){}...), std::make_tuple(std::get<storage_type<Get> *>(pools)...)};
@@ -633,7 +637,7 @@ class basic_group<Entity, exclude_t<Exclude...>, get_t<Get...>, Owned...> final 
 
         [[nodiscard]] reverse_iterator rend() const ENTT_NOEXCEPT {
             return length ? reverse_iterator{
-                std::get<0>(pools)->basic_sparse_set<Entity>::rbegin() + *length,
+                std::get<0>(pools)->basic_common_type::rbegin() + *length,
                 std::make_tuple((std::get<storage_type<Owned> *>(pools)->rbegin() + *length)...),
                 std::make_tuple(std::get<storage_type<Get> *>(pools)...)
             } : reverse_iterator{{}, std::make_tuple(decltype(std::get<storage_type<Owned> *>(pools)->rbegin()){}...), std::make_tuple(std::get<storage_type<Get> *>(pools)...)};
@@ -655,9 +659,9 @@ public:
     /*! @brief Unsigned integer type. */
     using size_type = std::size_t;
     /*! @brief Random access iterator type. */
-    using iterator = typename basic_sparse_set<Entity>::iterator;
+    using iterator = typename basic_common_type::iterator;
     /*! @brief Reversed iterator type. */
-    using reverse_iterator = typename basic_sparse_set<Entity>::reverse_iterator;
+    using reverse_iterator = typename basic_common_type::reverse_iterator;
 
     /*! @brief Default constructor to use to create empty, invalid groups. */
     basic_group() ENTT_NOEXCEPT
@@ -717,7 +721,7 @@ public:
      * @return An iterator to the first entity of the group.
      */
     [[nodiscard]] iterator begin() const ENTT_NOEXCEPT {
-        return *this ? (std::get<0>(pools)->basic_sparse_set<entity_type>::end() - *length) : iterator{};
+        return *this ? (std::get<0>(pools)->basic_common_type::end() - *length) : iterator{};
     }
 
     /**
@@ -731,7 +735,7 @@ public:
      * group.
      */
     [[nodiscard]] iterator end() const ENTT_NOEXCEPT {
-        return *this ? std::get<0>(pools)->basic_sparse_set<entity_type>::end() : iterator{};
+        return *this ? std::get<0>(pools)->basic_common_type::end() : iterator{};
     }
 
     /**
@@ -743,7 +747,7 @@ public:
      * @return An iterator to the first entity of the reversed group.
      */
     [[nodiscard]] reverse_iterator rbegin() const ENTT_NOEXCEPT {
-        return *this ? std::get<0>(pools)->basic_sparse_set<entity_type>::rbegin() : reverse_iterator{};
+        return *this ? std::get<0>(pools)->basic_common_type::rbegin() : reverse_iterator{};
     }
 
     /**
@@ -758,7 +762,7 @@ public:
      * reversed group.
      */
     [[nodiscard]] reverse_iterator rend() const ENTT_NOEXCEPT {
-        return *this ? (std::get<0>(pools)->basic_sparse_set<entity_type>::rbegin() + *length) : reverse_iterator{};
+        return *this ? (std::get<0>(pools)->basic_common_type::rbegin() + *length) : reverse_iterator{};
     }
 
     /**

@@ -76,6 +76,7 @@ class basic_registry {
             } else {
                 if(is_valid && !(std::get<0>(cpools)->index(entt) < current)) {
                     const auto pos = current++;
+                    ENTT_ASSERT(((std::get<storage_type<Owned> *>(cpools)->data()[pos] != tombstone) && ...));
                     (std::get<storage_type<Owned> *>(cpools)->swap(std::get<storage_type<Owned> *>(cpools)->data()[pos], entt), ...);
                 }
             }
@@ -133,15 +134,14 @@ class basic_registry {
     auto recycle_identifier() ENTT_NOEXCEPT {
         ENTT_ASSERT(free_list != null, "No entities available");
         const auto curr = traits_type::to_entity(free_list);
-        const auto version = traits_type::to_version(entities[curr]);
-        free_list = entities[curr];
-        return entities[curr] = traits_type::to_type(curr, version);
+        free_list = traits_type::to_type(entities[curr], tombstone);
+        return (entities[curr] = traits_type::to_type(curr, traits_type::to_version(entities[curr])));
     }
 
     auto release_entity(const Entity entity, const typename traits_type::version_type version) {
         const auto entt = traits_type::to_entity(entity);
         entities[entt] = traits_type::to_type(traits_type::to_integral(free_list), version + (traits_type::to_type(null, version) == tombstone));
-        free_list = traits_type::to_type(entt, {});
+        free_list = traits_type::to_type(entt, traits_type::to_version(tombstone));
         return traits_type::to_version(entities[entt]);
     }
 
@@ -493,6 +493,20 @@ public:
     }
 
     /**
+     * @brief In-place destroys an entity.
+     *
+     * The version is updated and the identifier can be recycled at any time.
+     *
+     * @sa destroy
+     *
+     * @param entity A valid entity identifier.
+     * @return The version of the recycled entity.
+     */
+    version_type stable_destroy(const entity_type entity) {
+        return stable_destroy(entity, traits_type::to_version(entity) + 1u);
+    }
+
+    /**
      * @brief Destroys an entity.
      *
      * The suggested version or the valid version closest to the suggested one
@@ -515,6 +529,28 @@ public:
     }
 
     /**
+     * @brief In-place destroys an entity.
+     *
+     * The suggested version or the valid version closest to the suggested one
+     * is used instead of the implicitly generated version.
+     *
+     * @sa destroy
+     *
+     * @param entity A valid entity identifier.
+     * @param version A desired version upon destruction.
+     * @return The version actually assigned to the entity.
+     */
+    version_type stable_destroy(const entity_type entity, const version_type version) {
+        ENTT_ASSERT(valid(entity), "Invalid entity");
+
+        for(auto pos = pools.size(); pos; --pos) {
+            pools[pos-1].pool && pools[pos-1].pool->stable_remove(entity, this);
+        }
+
+        return release_entity(entity, version);
+    }
+
+    /**
      * @brief Destroys all the entities in a range.
      *
      * @sa destroy
@@ -527,6 +563,22 @@ public:
     void destroy(It first, It last) {
         for(; first != last; ++first) {
             destroy(*first, version(*first) + 1u);
+        }
+    }
+
+    /**
+     * @brief In-place destroys all the entities in a range.
+     *
+     * @sa destroy
+     *
+     * @tparam It Type of input iterator.
+     * @param first An iterator to the first element of the range of entities.
+     * @param last An iterator past the last element of the range of entities.
+     */
+    template<typename It>
+    void stable_destroy(It first, It last) {
+        for(; first != last; ++first) {
+            stable_destroy(*first, version(*first) + 1u);
         }
     }
 
@@ -689,6 +741,22 @@ public:
     }
 
     /**
+     * @brief In-place removes the given components from an entity.
+     *
+     * @sa remove
+     *
+     * @tparam Component Types of components to remove.
+     * @param entity A valid entity identifier.
+     * @return The number of components actually removed.
+     */
+    template<typename... Component>
+    size_type stable_remove(const entity_type entity) {
+        ENTT_ASSERT(valid(entity), "Invalid entity");
+        static_assert(sizeof...(Component) > 0, "Provide one or more component types");
+        return (assure<Component>()->stable_remove(entity, this) + ... + size_type{});
+    }
+
+    /**
      * @brief Removes the given components from all the entities in a range.
      *
      * @sa remove
@@ -705,6 +773,29 @@ public:
 
         for(; first != last; ++first) {
             count += remove<Component...>(*first);
+        }
+
+        return count;
+    }
+
+    /**
+     * @brief In-place removes the given components from all the entities in a
+     * range.
+     *
+     * @sa remove
+     *
+     * @tparam Component Types of components to remove.
+     * @tparam It Type of input iterator.
+     * @param first An iterator to the first element of the range of entities.
+     * @param last An iterator past the last element of the range of entities.
+     * @return The number of components actually removed.
+     */
+    template<typename... Component, typename It>
+    size_type stable_remove(It first, It last) {
+        size_type count{};
+
+        for(; first != last; ++first) {
+            count += stable_remove<Component...>(*first);
         }
 
         return count;
@@ -728,6 +819,21 @@ public:
     }
 
     /**
+     * @brief In-place erases the given components from an entity.
+     *
+     * @sa erase
+     *
+     * @tparam Component Types of components to erase.
+     * @param entity A valid entity identifier.
+     */
+    template<typename... Component>
+    void stable_erase(const entity_type entity) {
+        ENTT_ASSERT(valid(entity), "Invalid entity");
+        static_assert(sizeof...(Component) > 0, "Provide one or more component types");
+        (assure<Component>()->stable_erase(entity, this), ...);
+    }
+
+    /**
      * @brief Erases the given components from all the entities in a range.
      *
      * @sa erase
@@ -741,6 +847,42 @@ public:
     void erase(It first, It last) {
         for(; first != last; ++first) {
             erase<Component...>(*first);
+        }
+    }
+
+    /**
+     * @brief In-place erases the given components from all the entities in a
+     * range.
+     *
+     * @sa erase
+     *
+     * @tparam Component Types of components to erase.
+     * @tparam It Type of input iterator.
+     * @param first An iterator to the first element of the range of entities.
+     * @param last An iterator past the last element of the range of entities.
+     */
+    template<typename... Component, typename It>
+    void stable_erase(It first, It last) {
+        for(; first != last; ++first) {
+            stable_erase<Component...>(*first);
+        }
+    }
+
+    /**
+     * @brief Removes all tombstones from a registry or only the pools for the
+     * given components.
+     * @tparam Component Types of components for which to clear all tombstones.
+     */
+    template<typename... Component>
+    void compact() {
+        if constexpr(sizeof...(Component) == 0) {
+            for(auto pos = pools.size(); pos; --pos) {
+                if(auto &pdata = pools[pos-1]; pdata.pool) {
+                    pdata.pool->compact();
+                }
+            }
+        } else {
+            (assure<Component>()->compact(), ...);
         }
     }
 
@@ -1619,7 +1761,7 @@ private:
     mutable std::vector<pool_data> pools{};
     std::vector<group_data> groups{};
     std::vector<entity_type> entities{};
-    entity_type free_list{null};
+    entity_type free_list{tombstone};
 };
 
 

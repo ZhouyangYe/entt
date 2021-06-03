@@ -3,11 +3,13 @@
 
 
 #if defined(__cpp_exceptions) && !defined(ENTT_NOEXCEPTION)
+#   define ENTT_EXCEPTIONS true
 #   define ENTT_NOEXCEPT noexcept
 #   define ENTT_THROW throw
 #   define ENTT_TRY try
 #   define ENTT_CATCH catch(...)
 #else
+#   define ENTT_EXCEPTIONS false
 #   define ENTT_NOEXCEPT
 #   define ENTT_THROW
 #   define ENTT_TRY if(true)

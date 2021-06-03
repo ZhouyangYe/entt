@@ -49,8 +49,6 @@ namespace entt {
  */
 template<typename Entity, typename Type, typename Allocator, typename>
 class basic_storage: public basic_sparse_set<Entity, typename std::allocator_traits<Allocator>::template rebind_alloc<Entity>> {
-    static_assert(std::is_move_constructible_v<Type> && std::is_move_assignable_v<Type>, "The managed type must be at least move constructible and assignable");
-
     static constexpr auto packed_page = ENTT_PACKED_PAGE;
 
     using underlying_type = basic_sparse_set<Entity, typename std::allocator_traits<Allocator>::template rebind_alloc<Entity>>;
@@ -179,13 +177,10 @@ class basic_storage: public basic_sparse_set<Entity, typename std::allocator_tra
 
     void release_memory() {
         if(packed) {
-            for(size_type pos{}; pos < bucket; ++pos) {
-                if(auto length = underlying_type::size(); length) {
-                    const auto sz = length > packed_page ? packed_page : length;
-                    std::destroy(packed[pos], packed[pos] + sz);
-                    length -= sz;
-                }
+            // no-throw stable erase iteration
+            underlying_type::clear();
 
+            for(size_type pos{}; pos < bucket; ++pos) {
                 alloc_traits::deallocate(allocator, packed[pos], packed_page);
                 bucket_alloc_traits::destroy(bucket_allocator, std::addressof(packed[pos]));
             }
@@ -201,31 +196,20 @@ class basic_storage: public basic_sparse_set<Entity, typename std::allocator_tra
             const auto mem = bucket_alloc_traits::allocate(bucket_allocator, length);
 
             if(bucket > length) {
-                ENTT_TRY {
-                    std::uninitialized_copy(packed, packed + length, mem);
-                } ENTT_CATCH {
-                    bucket_alloc_traits::deallocate(bucket_allocator, mem, length);
-                    ENTT_THROW;
-                }
+                std::uninitialized_copy(packed, packed + length, mem);
 
                 for(auto pos = length; pos < bucket; ++pos) {
                     alloc_traits::deallocate(allocator, packed[pos], packed_page);
                 }
             } else {
+                std::uninitialized_copy(packed, packed + bucket, mem);
+
                 size_type pos{};
 
                 ENTT_TRY {
-                    std::uninitialized_copy(packed, packed + bucket, mem);
-
                     for(pos = bucket; pos < length; ++pos) {
                         auto pg = alloc_traits::allocate(allocator, packed_page);
-
-                        ENTT_TRY {
-                            bucket_alloc_traits::construct(bucket_allocator, std::addressof(mem[pos]), pg);
-                        } ENTT_CATCH {
-                            alloc_traits::deallocate(allocator, pg, packed_page);
-                            ENTT_THROW;
-                        }
+                        bucket_alloc_traits::construct(bucket_allocator, std::addressof(mem[pos]), pg);
                     }
                 } ENTT_CATCH {
                     for(auto next = bucket; next < pos; ++next) {
@@ -271,22 +255,29 @@ protected:
         std::swap(packed[page(lhs)][offset(lhs)], packed[page(rhs)][offset(rhs)]);
     }
 
+    /*! @copydoc basic_sparse_set::move_and_pop */
+    void move_and_pop(const std::size_t from, const std::size_t to) final {
+        auto *instance = std::addressof(packed[page(to)][offset(to)]);
+        auto *other = std::addressof(packed[page(from)][offset(from)]);
+        alloc_traits::construct(allocator, instance, std::move(*other));
+        alloc_traits::destroy(allocator, other);
+    }
+
     /*! @copydoc basic_sparse_set::swap_and_pop */
     void swap_and_pop(const std::size_t pos) final {
         const auto length = underlying_type::size();
         auto &&elem = packed[page(pos)][offset(pos)];
         auto &&last = packed[page(length)][offset(length)];
 
-        ENTT_TRY {
-            [[maybe_unused]] auto other = std::move(elem);
-            elem = std::move(last);
-        } ENTT_CATCH {
-            // basic no-leak guarantee (with invalid state) if swapping throws
-            alloc_traits::destroy(allocator, std::addressof(last));
-            ENTT_THROW;
-        }
-
+        // support for nosy destructors
+        [[maybe_unused]] auto unused = std::move(elem);
+        elem = std::move(last);
         alloc_traits::destroy(allocator, std::addressof(last));
+    }
+
+    /*! @copydoc basic_sparse_set::in_place_pop */
+    void in_place_pop(const std::size_t pos) final {
+        alloc_traits::destroy(allocator, std::addressof(packed[page(pos)][offset(pos)]));
     }
 
 public:
@@ -319,7 +310,7 @@ public:
         : underlying_type{alloc},
           allocator{alloc},
           bucket_allocator{alloc},
-          packed{},
+          packed{bucket_alloc_traits::allocate(bucket_allocator, 0u)},
           bucket{}
     {}
 
@@ -507,13 +498,13 @@ public:
      * @param entt A valid entity identifier.
      * @return The object assigned to the entity.
      */
-    [[nodiscard]] const value_type & get(const entity_type entt) const {
+    [[nodiscard]] const value_type & get(const entity_type entt) const ENTT_NOEXCEPT {
         const auto idx = underlying_type::index(entt);
         return packed[page(idx)][offset(idx)];
     }
 
     /*! @copydoc get */
-    [[nodiscard]] value_type & get(const entity_type entt) {
+    [[nodiscard]] value_type & get(const entity_type entt) ENTT_NOEXCEPT {
         return const_cast<value_type &>(std::as_const(*this).get(entt));
     }
 
@@ -718,7 +709,7 @@ public:
      *
      * @param entt A valid entity identifier.
      */
-    void get([[maybe_unused]] const entity_type entt) const {
+    void get([[maybe_unused]] const entity_type entt) const ENTT_NOEXCEPT {
         ENTT_ASSERT(underlying_type::contains(entt), "Storage does not contain entity");
     }
 
@@ -832,11 +823,11 @@ struct storage_adapter_mixin: Type {
  */
 template<typename Type>
 class sigh_storage_mixin final: public Type {
-    /*! @copydoc basic_sparse_set::about_to_erase */
-    void about_to_erase(const typename Type::entity_type entity, void *ud) final {
+    /*! @copydoc basic_sparse_set::about_to_pop */
+    void about_to_pop(const typename Type::entity_type entity, void *ud) final {
         ENTT_ASSERT(ud != nullptr, "Invalid pointer to registry");
         destruction.publish(*static_cast<basic_registry<typename Type::entity_type> *>(ud), entity);
-        Type::about_to_erase(entity, ud);
+        Type::about_to_pop(entity, ud);
     }
 
 public:
